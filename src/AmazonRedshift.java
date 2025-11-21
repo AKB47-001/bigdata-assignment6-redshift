@@ -13,22 +13,24 @@ import java.util.Properties;
 
 public class AmazonRedshift {
 
-    /** Loaded from config.properties */
+    // Loading the values for sensitive variables via config file
     private static String HOST;
     private static String PORT;
     private static String DB_NAME;
     private static String USER;
     private static String PASSWORD;
-
     private static String S3_BUCKET;
     private static String S3_PREFIX;
     private static String IAM_ROLE_ARN;
 
+    // Setting the confid file and path for script to create tables
     private static final String CONFIG_FILE = "config.properties";
     private static final String DDL_FILE = "ddl/tpch_create.sql";
 
+    // Creating a connection object
     private Connection con;
 
+    // Main method
     public static void main(String[] args) {
         AmazonRedshift app = new AmazonRedshift();
 
@@ -48,39 +50,35 @@ public class AmazonRedshift {
         }
     }
 
-    /** Load configuration from config.properties */
+    // Function to load the properties from properties file
     private static void loadConfig() throws Exception {
-        System.out.println("Loading configuration from " + CONFIG_FILE);
-
+        System.out.println("\n[INFO] Loading Configuration from config.properties" + CONFIG_FILE);
         Properties props = new Properties();
         props.load(new FileInputStream(CONFIG_FILE));
-
         HOST = props.getProperty("HOST");
         PORT = props.getProperty("PORT");
         DB_NAME = props.getProperty("DB_NAME");
         USER = props.getProperty("USER");
         PASSWORD = props.getProperty("PASSWORD");
-
         S3_BUCKET = props.getProperty("S3_BUCKET");
         S3_PREFIX = props.getProperty("S3_PREFIX");
         IAM_ROLE_ARN = props.getProperty("IAM_ROLE_ARN");
-
-        System.out.println("Configuration loaded successfully.\n");
+        System.out.println("[INFO] Configuration has been loaded successfully.\n");
     }
 
-    /** Connect to AWS Redshift */
+    // Function to establish connection to RedShift dev database
     public Connection connect() throws SQLException {
         String url = "jdbc:redshift://" + HOST + ":" + PORT + "/" + DB_NAME;
-        System.out.println("Connecting to Redshift: " + url);
+        System.out.println("\n[INFO] Connecting to Redshift: " + url);
 
         con = DriverManager.getConnection(url, USER, PASSWORD);
-        System.out.println("Connected successfully.\n");
+        System.out.println("[INFO] Connected Successfully.\n");
         return con;
     }
 
     /** Close DB connection */
     public void close() {
-        System.out.println("Closing database connection.");
+        System.out.println("\n[INFO] Closing Database Connection.\n");
         try {
             if (con != null) con.close();
         } catch (SQLException e) {
@@ -88,9 +86,9 @@ public class AmazonRedshift {
         }
     }
 
-    /** Drop TPC-H schema (safe order) */
+    // Function to drop the existing schema
     public void drop() {
-        System.out.println("Dropping TPC-H tables...");
+        System.out.println("\n[INFO] Dropping tables if already exists..");
 
         String[] drops = new String[] {
             "DROP TABLE IF EXISTS LINEITEM CASCADE",
@@ -112,12 +110,12 @@ public class AmazonRedshift {
             e.printStackTrace();
         }
 
-        System.out.println("Drop completed.\n");
+        System.out.println("[INFO] Drop completed.\n");
     }
 
-    /** Create TPC-H schema from DDL file */
+    // Function to create the schema/tables
     public void create() {
-        System.out.println("Creating schema from DDL...");
+        System.out.println("\n[INFO] Creating schema from DDL script ...");
 
         try {
             String ddl = new String(Files.readAllBytes(Paths.get(DDL_FILE)), StandardCharsets.UTF_8);
@@ -126,70 +124,74 @@ public class AmazonRedshift {
             try (Statement stmt = con.createStatement()) {
                 for (String s : stmts) {
                     if (s.trim().length() > 0) {
-                        System.out.println("Executing DDL...");
+                        System.out.println("[INFO] Executing DDL to Create Tables...");
                         stmt.execute(s);
                     }
                 }
             }
-            System.out.println("Schema created.\n");
+            System.out.println("[INFO] Schema created.\n");
 
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    /** COPY data from S3 */
+    // Function to copying .tbl files from s3 bucket to Redshift
     public void insert() {
-        System.out.println("Loading data using COPY from S3...\n");
+        System.out.println("\n[INFO] COPYING Tables data using COPY from S3...\n");
 
         String keyPrefix = S3_PREFIX.isEmpty() ? "" : (S3_PREFIX + "/");
 
-        String[] copyStatements = new String[] {
-
-            "COPY REGION FROM 's3://" + S3_BUCKET + "/" + keyPrefix + "region.tbl' "
-            + "IAM_ROLE '" + IAM_ROLE_ARN + "' DELIMITER '|' DATEFORMAT 'YYYY-MM-DD'",
-
-            "COPY NATION FROM 's3://" + S3_BUCKET + "/" + keyPrefix + "nation.tbl' "
-            + "IAM_ROLE '" + IAM_ROLE_ARN + "' DELIMITER '|' DATEFORMAT 'YYYY-MM-DD'",
-
-            "COPY SUPPLIER FROM 's3://" + S3_BUCKET + "/" + keyPrefix + "supplier.tbl' "
-            + "IAM_ROLE '" + IAM_ROLE_ARN + "' DELIMITER '|' DATEFORMAT 'YYYY-MM-DD'",
-
-            "COPY PART FROM 's3://" + S3_BUCKET + "/" + keyPrefix + "part.tbl' "
-            + "IAM_ROLE '" + IAM_ROLE_ARN + "' DELIMITER '|' DATEFORMAT 'YYYY-MM-DD'",
-
-            "COPY PARTSUPP FROM 's3://" + S3_BUCKET + "/" + keyPrefix + "partsupp.tbl' "
-            + "IAM_ROLE '" + IAM_ROLE_ARN + "' DELIMITER '|' DATEFORMAT 'YYYY-MM-DD'",
-
-            "COPY CUSTOMER FROM 's3://" + S3_BUCKET + "/" + keyPrefix + "customer.tbl' "
-            + "IAM_ROLE '" + IAM_ROLE_ARN + "' DELIMITER '|' DATEFORMAT 'YYYY-MM-DD'",
-
-            "COPY ORDERS FROM 's3://" + S3_BUCKET + "/" + keyPrefix + "orders.tbl' "
-            + "IAM_ROLE '" + IAM_ROLE_ARN + "' DELIMITER '|' DATEFORMAT 'YYYY-MM-DD'",
-
-            "COPY LINEITEM FROM 's3://" + S3_BUCKET + "/" + keyPrefix + "lineitem.tbl' "
-            + "IAM_ROLE '" + IAM_ROLE_ARN + "' DELIMITER '|' DATEFORMAT 'YYYY-MM-DD'"
-        };
-
         try (Statement stmt = con.createStatement()) {
-            for (String sql : copyStatements) {
-                System.out.println("Running: " + sql);
+
+            // List of tables and file names in correct load order
+            String[][] tables = {
+                {"REGION",   "region.tbl"},
+                {"NATION",   "nation.tbl"},
+                {"SUPPLIER", "supplier.tbl"},
+                {"PART",     "part.tbl"},
+                {"PARTSUPP", "partsupp.tbl"},
+                {"CUSTOMER", "customer.tbl"},
+                {"ORDERS",   "orders.tbl"},
+                {"LINEITEM", "lineitem.tbl"}
+            };
+
+            for (String[] t : tables) {
+
+                String table = t[0];
+                String file  = t[1];
+
+                String sql =
+                        "COPY " + table +
+                        " FROM 's3://" + S3_BUCKET + "/" + keyPrefix + file + "' " +
+                        " IAM_ROLE '" + IAM_ROLE_ARN + "' " +
+                        " DELIMITER '|' DATEFORMAT 'YYYY-MM-DD'";
+
                 long start = System.currentTimeMillis();
                 stmt.executeUpdate(sql);
                 long end = System.currentTimeMillis();
-                System.out.println(" → Completed in " + (end - start) / 1000.0 + " seconds\n");
+
+                // Row count
+                ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM " + table);
+                rs.next();
+                long count = rs.getLong(1);
+
+                System.out.printf("Loaded %-10s | %,12d rows | %.2f sec%n",
+                        table, count, (end - start) / 1000.0);
             }
+
+            System.out.println("\n[INFO] All COPY operations completed.\n");
+
         } catch (SQLException e) {
-            System.out.println("Error during COPY:");
+            System.out.println("[INFO] Error during COPY:");
             e.printStackTrace();
         }
-
-        System.out.println("All COPY operations finished.\n");
     }
 
-    /** Query 1 */
+
+    // Function for Solution of Query1
     public ResultSet query1() throws SQLException {
-        System.out.println("Executing Query 1...\n");
+        System.out.println("\n[INFO] Executing Query 1...\n");
 
         String sql =
             "SELECT o.O_ORDERKEY, o.O_TOTALPRICE, o.O_ORDERDATE "
@@ -207,9 +209,9 @@ public class AmazonRedshift {
         return rs;
     }
 
-    /** Query 2 */
+    // Function for Solution of Query2
     public ResultSet query2() throws SQLException {
-        System.out.println("Executing Query 2...\n");
+        System.out.println("\n[INFO] Executing Query 2...\n");
 
         String sql =
             "SELECT c.C_CUSTKEY, SUM(o.O_TOTALPRICE) AS TOTAL_SPENT "
@@ -235,9 +237,9 @@ public class AmazonRedshift {
         return rs;
     }
 
-    /** Query 3 */
+    // Function for Solution of Query3
     public ResultSet query3() throws SQLException {
-        System.out.println("Executing Query 3...\n");
+        System.out.println("\n[INFO] Executing Query 3...\n");
 
         String sql =
             "SELECT o.O_ORDERPRIORITY, COUNT(*) AS NUM_ITEMS "
