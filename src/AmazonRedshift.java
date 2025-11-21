@@ -1,3 +1,4 @@
+import java.io.FileInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -8,34 +9,35 @@ import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.Properties;
 
 public class AmazonRedshift {
 
-    /** JDBC Configuration — your actual Redshift details */
-    private static final String HOST     = "redshift-cluster-1.cj1cawepygbu.us-east-1.redshift.amazonaws.com";
-    private static final String PORT     = "5439";
-    private static final String DB_NAME  = "dev";
-    private static final String USER     = "awsuser";
-    private static final String PASSWORD = "Prakshit123#";
+    /** Loaded from config.properties */
+    private static String HOST;
+    private static String PORT;
+    private static String DB_NAME;
+    private static String USER;
+    private static String PASSWORD;
 
-    /** S3 Bucket & IAM Role — YOUR valid values */
-    private static final String S3_BUCKET = "assignment6-ankit";
-    private static final String S3_PREFIX = "";  // files are directly in root — no folder
-    private static final String IAM_ROLE_ARN =
-        "arn:aws:iam::411080313195:role/service-role/AmazonRedshift-CommandsAccessRole-20251121T101848";
+    private static String S3_BUCKET;
+    private static String S3_PREFIX;
+    private static String IAM_ROLE_ARN;
 
-    /** DDL file path */
+    private static final String CONFIG_FILE = "config.properties";
     private static final String DDL_FILE = "ddl/tpch_create.sql";
 
     private Connection con;
 
     public static void main(String[] args) {
         AmazonRedshift app = new AmazonRedshift();
+
         try {
+            loadConfig();
             app.connect();
             app.drop();
             app.create();
-            app.insert();   // COPY from S3 (fast)
+            app.insert();   // COPY FROM S3
             app.query1();
             app.query2();
             app.query3();
@@ -46,20 +48,37 @@ public class AmazonRedshift {
         }
     }
 
+    /** Load configuration from config.properties */
+    private static void loadConfig() throws Exception {
+        System.out.println("Loading configuration from " + CONFIG_FILE);
+
+        Properties props = new Properties();
+        props.load(new FileInputStream(CONFIG_FILE));
+
+        HOST = props.getProperty("HOST");
+        PORT = props.getProperty("PORT");
+        DB_NAME = props.getProperty("DB_NAME");
+        USER = props.getProperty("USER");
+        PASSWORD = props.getProperty("PASSWORD");
+
+        S3_BUCKET = props.getProperty("S3_BUCKET");
+        S3_PREFIX = props.getProperty("S3_PREFIX");
+        IAM_ROLE_ARN = props.getProperty("IAM_ROLE_ARN");
+
+        System.out.println("Configuration loaded successfully.\n");
+    }
+
     /** Connect to AWS Redshift */
     public Connection connect() throws SQLException {
-        if (con != null && !con.isClosed()) return con;
-
         String url = "jdbc:redshift://" + HOST + ":" + PORT + "/" + DB_NAME;
-
         System.out.println("Connecting to Redshift: " + url);
-        con = DriverManager.getConnection(url, USER, PASSWORD);
 
+        con = DriverManager.getConnection(url, USER, PASSWORD);
         System.out.println("Connected successfully.\n");
         return con;
     }
 
-    /** Close connection */
+    /** Close DB connection */
     public void close() {
         System.out.println("Closing database connection.");
         try {
@@ -69,7 +88,7 @@ public class AmazonRedshift {
         }
     }
 
-    /** Drop tables in dependency-safe order */
+    /** Drop TPC-H schema (safe order) */
     public void drop() {
         System.out.println("Dropping TPC-H tables...");
 
@@ -96,34 +115,30 @@ public class AmazonRedshift {
         System.out.println("Drop completed.\n");
     }
 
-    /** Execute DDL from file */
+    /** Create TPC-H schema from DDL file */
     public void create() {
         System.out.println("Creating schema from DDL...");
 
         try {
-            String ddl = new String(Files.readAllBytes(Paths.get(DDL_FILE)),
-                    StandardCharsets.UTF_8);
-
+            String ddl = new String(Files.readAllBytes(Paths.get(DDL_FILE)), StandardCharsets.UTF_8);
             String[] stmts = ddl.split(";");
 
             try (Statement stmt = con.createStatement()) {
                 for (String s : stmts) {
                     if (s.trim().length() > 0) {
-                        System.out.println("Executing DDL statement...");
+                        System.out.println("Executing DDL...");
                         stmt.execute(s);
                     }
                 }
             }
-
             System.out.println("Schema created.\n");
 
         } catch (Exception e) {
-            System.out.println("Error reading/executing DDL.");
             e.printStackTrace();
         }
     }
 
-    /** COPY all .tbl files from S3 into Redshift */
+    /** COPY data from S3 */
     public void insert() {
         System.out.println("Loading data using COPY from S3...\n");
 
@@ -172,9 +187,9 @@ public class AmazonRedshift {
         System.out.println("All COPY operations finished.\n");
     }
 
-    /** QUERY #1 */
+    /** Query 1 */
     public ResultSet query1() throws SQLException {
-        System.out.println("Executing Query 1: Top 10 most recent orders by customers in AMERICA.\n");
+        System.out.println("Executing Query 1...\n");
 
         String sql =
             "SELECT o.O_ORDERKEY, o.O_TOTALPRICE, o.O_ORDERDATE "
@@ -192,7 +207,7 @@ public class AmazonRedshift {
         return rs;
     }
 
-    /** QUERY #2 */
+    /** Query 2 */
     public ResultSet query2() throws SQLException {
         System.out.println("Executing Query 2...\n");
 
@@ -220,7 +235,7 @@ public class AmazonRedshift {
         return rs;
     }
 
-    /** QUERY #3 */
+    /** Query 3 */
     public ResultSet query3() throws SQLException {
         System.out.println("Executing Query 3...\n");
 
@@ -239,7 +254,7 @@ public class AmazonRedshift {
         return rs;
     }
 
-    /** Utility: convert ResultSet to readable output */
+    /** Convert ResultSet to readable string */
     public static String resultSetToString(ResultSet rst, int maxrows) throws SQLException {
         StringBuilder sb = new StringBuilder(4096);
         ResultSetMetaData meta = rst.getMetaData();
